@@ -16,17 +16,23 @@ import (
 type packet_info struct {
 	Src_ip uint32 `bpf:"src_ip"`
 	Dst_ip uint32 `bpf:"dst_ip"`
-	Length uint16 `bpf:"length"`
 	Src_port uint16 `bpf:"src_port"`
 	Dst_port uint16 `bpf:"dst_port"`
+	Length uint16 `bpf:"length"`
 	_      uint16 // Padding to match the alignment of the C struct
 }
 
 func intToIP(ipInt uint32) string {
-	// Convert the integer to a byte slice in network byte order (big-endian)
-	ipBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(ipBytes, ipInt)
-	return net.IP(ipBytes).String()
+	// // Convert the integer from network byte order to host byte order
+	// ipInt = binary.BigEndian.Uint32([]byte{
+	// 	byte(ipInt >> 24),
+	// 	byte(ipInt >> 16),
+	// 	byte(ipInt >> 8),
+	// 	byte(ipInt),
+	// })
+	ip := make(net.IP, 4)
+	binary.BigEndian.PutUint32(ip, ipInt)
+	return ip.String()
 }
 
 func main(){
@@ -57,23 +63,28 @@ func main(){
 
 	log.Printf("Intercepting incoming packets on %s...", ifname)
 
-	// Print new packets every second
-	tick := time.Tick(time.Second)
-	stop := make(chan os.Signal, 5)
+	// Poll for packets continuously
+	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt)
-
 	for {
-		select {
-		case <- tick:
-			var packet packet_info
-			err := objs.PacketMap.Lookup(uint32(0), &packet)
-			if err != nil {
-				log.Fatal("Map lookup: ", err)
-			}
-			log.Printf("Received packet: src: %s:%d, dst: %s:%d, len: %d",intToIP(packet.Src_ip), packet.Src_port, intToIP(packet.Dst_ip), packet.Dst_port, packet.Length)
-		case <- stop:
-			log.Printf("Received signal, exiting..")
-			return
+	  select {
+	  case <-stop:
+		log.Printf("Received signal, exiting..")
+		return
+	  default:
+		// Attempt to read packets from the map
+		for i := 0; i < 1024; i++ {
+		  var packet packet_info
+		  err := objs.PacketMap.Lookup(uint32(i), &packet)
+		  if err == nil {
+			log.Printf("Received packet: src: %s:%d, dst: %s:%d, len: %d",
+			  intToIP(packet.Src_ip), packet.Src_port,
+			  intToIP(packet.Dst_ip), packet.Dst_port,
+			  packet.Length,
+			)
+		  }
 		}
+		time.Sleep(100 * time.Millisecond) // Avoid busy-waiting
+	  }
 	}
 }

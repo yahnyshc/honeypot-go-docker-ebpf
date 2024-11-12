@@ -5,7 +5,9 @@
 #include <linux/tcp.h>
 #include <linux/udp.h>
 #include <bpf/bpf_helpers.h>
+#include <stdio.h>
 #define ntohs(x) __builtin_bswap16(x)
+#define ntohl(x) __builtin_bswap32(x)
 
 struct packet_info {
     __u32 src_ip;
@@ -46,13 +48,14 @@ int xdp_packet_inspector(struct xdp_md *ctx){
     }
 
     struct packet_info pkt_info = {
-        .src_ip = ip->saddr,
-        .dst_ip = ip->daddr,
-        .length = ntohs(ip->tot_len),
+        .src_ip = ntohl(ip->saddr),
+        .dst_ip = ntohl(ip->daddr),
+        .length = ntohl(ip->tot_len),
         .src_port = 0,
         .dst_port = 0,
     };
-// Calculate transport header offset
+
+    // Calculate transport header offset
     void *transport_header = data + sizeof(*eth) + (ip->ihl * 4);
     if (transport_header > data_end) {
         return XDP_PASS;
@@ -75,8 +78,7 @@ int xdp_packet_inspector(struct xdp_md *ctx){
         pkt_info.dst_port = ntohs(udp->dest);
     }
 
-    __u32 key = 0; //bpf_get_smp_processor_id();
-
+    __u32 key = bpf_get_prandom_u32() % 1024;  // Unique key for each packet
     bpf_map_update_elem(&packet_map, &key, &pkt_info, BPF_ANY);
 
     return XDP_PASS;
